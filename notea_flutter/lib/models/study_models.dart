@@ -204,11 +204,21 @@ class FeynmanSession {
   final String id;
   String concept;
   String simpleExplanation;
+
+  /// "Forgot something important"
   bool identifiedGaps;
+
+  /// "Can't simplify enough" (kept under its old name so saved sessions still load)
   bool revisitedSource;
   DateTime dateCreated;
   bool isCompleted;
   int? score;
+
+  /// 'explain' or 'test' (study-buddy sessions); null for old manual sessions.
+  String? mode;
+
+  /// Short notes from the Identify Gaps results (things to review).
+  List<String> gaps;
 
   FeynmanSession({
     String? id,
@@ -219,8 +229,11 @@ class FeynmanSession {
     DateTime? dateCreated,
     this.isCompleted = false,
     this.score,
+    this.mode,
+    List<String>? gaps,
   })  : id = id ?? newId(),
-        dateCreated = dateCreated ?? DateTime.now();
+        dateCreated = dateCreated ?? DateTime.now(),
+        gaps = gaps ?? [];
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -231,6 +244,8 @@ class FeynmanSession {
         'dateCreated': dateCreated.millisecondsSinceEpoch,
         'isCompleted': isCompleted,
         'score': score,
+        'mode': mode,
+        'gaps': gaps,
       };
 
   factory FeynmanSession.fromJson(Map<String, dynamic> j) => FeynmanSession(
@@ -242,6 +257,8 @@ class FeynmanSession {
         dateCreated: dateFrom(j['dateCreated']),
         isCompleted: j['isCompleted'] == true,
         score: j['score'] is int ? j['score'] as int : null,
+        mode: j['mode'] as String?,
+        gaps: (j['gaps'] is List) ? (j['gaps'] as List).whereType<String>().toList() : null,
       );
 }
 

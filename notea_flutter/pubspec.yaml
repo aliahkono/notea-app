@@ -17,6 +17,8 @@ dependencies:
   path_provider: ^2.1.4
   archive: ^4.0.0
   syncfusion_flutter_pdf: ">=30.0.0 <40.0.0"
+  speech_to_text: ">=7.4.0 <7.5.0"
+  flutter_tts: ^4.2.0
 
 dev_dependencies:
   flutter_test:

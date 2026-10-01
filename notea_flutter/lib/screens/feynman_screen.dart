@@ -1,15 +1,143 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/controllers.dart';
 import '../controllers/pet_controller.dart';
-import '../models/pet.dart';
-import '../models/study_models.dart';
+import '../controllers/study_material_controller.dart';
+import '../services/database_manager.dart';
+import '../services/pet_brain.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import 'feynman_call.dart';
+import 'pet_screens.dart' show PetImage;
+import 'study_materials_screen.dart' show materialStyle, showAddMaterialSheet, StudyMaterialsPage;
 
-/// Port of FeynmanTabView.swift
+// ===========================================================================
+// Shared pet widgets
+// ===========================================================================
+
+/// The study buddy's name (or "your egg" before it hatches).
+String buddyName(PetController pet) => pet.state.hatched ? pet.state.name : 'your egg';
+
+/// Name used in greetings: the profile name, or the part of the email before "@".
+String greetingName(BuildContext context) {
+  final profile = context.read<ProfileController>().userProfile.username.trim();
+  if (profile.isNotEmpty && !profile.startsWith('New User')) return profile;
+  final email = context.read<DatabaseManager>().currentUser?.email ?? '';
+  if (email.contains('@')) {
+    final n = email.split('@').first.replaceAll(RegExp(r'[._\d]+'), ' ').trim();
+    if (n.isNotEmpty) return n[0].toUpperCase() + n.substring(1);
+  }
+  return 'friend';
+}
+
+/// The pet (or its egg), gently bobbing.
+class BuddyAvatar extends StatefulWidget {
+  final double size;
+  const BuddyAvatar({super.key, this.size = 120});
+
+  @override
+  State<BuddyAvatar> createState() => _BuddyAvatarState();
+}
+
+class _BuddyAvatarState extends State<BuddyAvatar> with SingleTickerProviderStateMixin {
+  late final AnimationController _bob =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 1600))..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _bob.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pet = context.watch<PetController>();
+    final img = pet.state.hatched
+        ? PetImage(companion: pet.companion)
+        : Image.asset('assets/pet/egg_nest.png', fit: BoxFit.contain);
+    return AnimatedBuilder(
+      animation: _bob,
+      builder: (_, child) => Transform.translate(
+        offset: Offset(0, -6 * Curves.easeInOut.transform(_bob.value)),
+        child: child,
+      ),
+      child: SizedBox(width: widget.size, height: widget.size, child: img),
+    );
+  }
+}
+
+/// Speech bubble with a little tail pointing at the pet.
+class BuddyBubble extends StatelessWidget {
+  final String text;
+  final Color color;
+  const BuddyBubble(this.text, {super.key, this.color = NC.surface});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: softShadow(0.08, 14, const Offset(0, 4)),
+          ),
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 250),
+            child: Text(text, key: ValueKey(text), style: NText.body.copyWith(fontSize: 16)),
+          ),
+        ),
+        Positioned(
+          left: -7,
+          top: 26,
+          child: Transform.rotate(
+            angle: 0.785,
+            child: Container(width: 16, height: 16, color: color),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Pet + speech bubble, used on the intro and choice steps.
+class BuddyStage extends StatelessWidget {
+  final String message;
+  const BuddyStage({super.key, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 18, 16, 18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(30),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [NC.plumSoft, NC.pinkSoft],
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const BuddyAvatar(size: 112),
+          const SizedBox(width: 12),
+          Expanded(child: BuddyBubble(message)),
+        ],
+      ),
+    );
+  }
+}
+
+// ===========================================================================
+// Feynman: pick a topic + feed notes -> choose Explain / Test
+// ===========================================================================
+
 class FeynmanScreen extends StatefulWidget {
   const FeynmanScreen({super.key});
 
@@ -18,288 +146,93 @@ class FeynmanScreen extends StatefulWidget {
 }
 
 class _FeynmanScreenState extends State<FeynmanScreen> {
-  FeynmanSession currentSession = FeynmanSession();
+  final _topic = TextEditingController();
+  final Set<String> _selected = {};
+  final Set<String> _known = {};
+  bool _choosing = false;
+  bool _loading = false;
 
-  bool _isValid(FeynmanController c) {
-    return c.validateExplanation(currentSession.concept) &&
-        c.validateExplanation(currentSession.simpleExplanation);
+  @override
+  void initState() {
+    super.initState();
+    _topic.addListener(() => setState(() {}));
+    // Everything already fed is selected by default.
+    for (final m in context.read<StudyMaterialsController>().materials) {
+      _known.add(m.id);
+      _selected.add(m.id);
+    }
   }
 
-  void _save() {
-    final c = context.read<FeynmanController>();
-    currentSession.score = c.calculateScore(currentSession);
-    currentSession.isCompleted = true;
-    c.addSession(currentSession);
-    setState(() => currentSession = FeynmanSession());
-    final pet = context.read<PetController>();
-    pet.reward(PetReward.feynman);
-    celebrate(context, pet.lastEvent);
+  @override
+  void dispose() {
+    _topic.dispose();
+    super.dispose();
   }
 
-  Future<void> _editText({
-    required String title,
-    required String navTitle,
-    required String subtitle,
-    required String hint,
-    required String initial,
-    required double minHeight,
-    required ValueChanged<String> onDone,
-  }) async {
-    final result = await pushPage<String>(
-      context,
-      _TextInputPage(
-        title: title,
-        navTitle: navTitle,
-        subtitle: subtitle,
-        hint: hint,
-        initial: initial,
-        minHeight: minHeight,
-      ),
-      fullscreenDialog: true,
-    );
-    if (result != null) setState(() => onDone(result));
+  String get _when {
+    final h = DateTime.now().hour;
+    return (h >= 18 || h < 4) ? 'tonight' : 'today';
   }
 
-  Future<void> _editGaps() async {
-    await pushPage(
-      context,
-      _GapsPage(session: currentSession),
-      fullscreenDialog: true,
-    );
-    setState(() {});
-  }
+  void _toast(String msg) => ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(msg)));
 
-  void _showHistory() => pushPage(context, const _FeynmanHistoryPage(), fullscreenDialog: true);
-
-  Widget _card({required Color color, required Widget child, required VoidCallback onTap}) {
-    return Material(
-      color: color,
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 80),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: child,
-        ),
-      ),
-    );
-  }
-
-  Widget _solidButton(String label, Color color, VoidCallback? onTap, {double height = 58}) {
-    return SizedBox(
-      height: height,
-      child: TextButton(
-        style: TextButton.styleFrom(
-          backgroundColor: color,
-          disabledBackgroundColor: fade(color, 0.4),
-          foregroundColor: Colors.white,
-          disabledForegroundColor: fade(Colors.white, 0.8),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        ),
-        onPressed: onTap,
-        child: Text(label,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-      ),
-    );
+  Future<void> _start(String mode) async {
+    final smc = context.read<StudyMaterialsController>();
+    final chosen = smc.materials.where((m) => _selected.contains(m.id)).toList();
+    setState(() => _loading = true);
+    try {
+      final materials = <(String, String, String)>[];
+      for (final m in chosen) {
+        materials.add((m.title, await smc.textFor(m), m.kind));
+      }
+      final brain = await compute(_buildBrain, (_topic.text.trim(), materials));
+      if (!mounted) return;
+      if (brain.isEmpty) {
+        _toast('Those notes look empty. Feed me a file with some text in it!');
+        return;
+      }
+      if (mode == 'test' && brain.makeTest().isEmpty) {
+        _toast('I couldn\'t make test questions from these notes. Try Explain mode, or add more notes.');
+        return;
+      }
+      await Navigator.of(context).pushReplacement(MaterialPageRoute(
+        builder: (_) => FeynmanCallPage(topic: _topic.text.trim(), mode: mode, brain: brain),
+      ));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    const small = TextStyle(fontSize: 11, color: IOSColors.gray);
-    final controller = context.watch<FeynmanController>();
-    final concept = currentSession.concept.trim();
-    final explanation = currentSession.simpleExplanation.trim();
+    final pet = context.watch<PetController>();
+    final smc = context.watch<StudyMaterialsController>();
+    // Auto-select notes that were just added.
+    for (final m in smc.materials) {
+      if (_known.add(m.id)) _selected.add(m.id);
+    }
+    _selected.removeWhere((id) => smc.materials.every((m) => m.id != id));
+
     return Scaffold(
-      backgroundColor: rgb(1.0, 0.98, 0.93),
       body: SafeArea(
         child: Column(
           children: [
             BackHeader(
               label: 'Study',
-              fontSize: 17,
               trailing: [
-                TextButton(
-                  onPressed: _showHistory,
-                  child: const Text('History', style: TextStyle(color: IOSColors.blue, fontSize: 17)),
+                TextButton.icon(
+                  onPressed: () => pushPage(context, const FeynmanHistoryPage(), fullscreenDialog: true),
+                  icon: const Icon(Icons.history_rounded, size: 18),
+                  label: const Text('History'),
                 ),
               ],
             ),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-                children: [
-                  const Center(
-                    child: Text('Feynman Technique',
-                        style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-                  ),
-                  const SizedBox(height: 6),
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Flexible(
-                        child: Text("Explain like you're teaching a friend!",
-                            style: TextStyle(fontSize: 15, color: IOSColors.gray)),
-                      ),
-                      SizedBox(width: 8),
-                      Icon(Icons.psychology, color: IOSColors.pink, size: 26),
-                      Icon(Icons.menu_book, color: IOSColors.purple, size: 26),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  // Choose a Concept
-                  _card(
-                    color: fade(IOSColors.purple, 0.15),
-                    onTap: () => _editText(
-                      title: 'Choose a Concept',
-                      navTitle: 'Concept',
-                      subtitle: 'Pick a topic you want to understand better',
-                      hint: "E.g., Photosynthesis, Newton's Laws, Quantum Physics...",
-                      initial: currentSession.concept,
-                      minHeight: 100,
-                      onDone: (v) => currentSession.concept = v,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Choose a Concept',
-                                  style: TextStyle(
-                                      fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black)),
-                              const SizedBox(height: 8),
-                              Text(
-                                concept.isEmpty ? "E.g., Photosynthesis,\nNewton's Laws..." : concept,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                    fontSize: 12,
-                                    color: concept.isEmpty ? IOSColors.gray : Colors.black87),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: fade(IOSColors.yellow, 0.8),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: fade(Colors.black, 0.2)),
-                          ),
-                          child: const Text('Explain it\nsimply!',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  // Teach It Simply
-                  _card(
-                    color: fade(IOSColors.orange, 0.15),
-                    onTap: () => _editText(
-                      title: 'Teach It Simply',
-                      navTitle: 'Teach Simply',
-                      subtitle: 'Explain your concept as if teaching a friend',
-                      hint:
-                          "Use simple words and avoid jargon. If you can't explain it simply, you don't understand it well enough.",
-                      initial: currentSession.simpleExplanation,
-                      minHeight: 150,
-                      onDone: (v) => currentSession.simpleExplanation = v,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Teach It Simply',
-                                  style: TextStyle(
-                                      fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black)),
-                              if (explanation.isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(explanation,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 12, color: Colors.black87)),
-                              ],
-                            ],
-                          ),
-                        ),
-                        Image.asset('assets/images/cat_mascot.png', width: 40, height: 40),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  // Identify Gaps
-                  _card(
-                    color: fade(IOSColors.yellow, 0.15),
-                    onTap: _editGaps,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Identify Gaps',
-                                  style: TextStyle(
-                                      fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black)),
-                              const SizedBox(height: 6),
-                              Row(children: [
-                                Icon(
-                                    currentSession.identifiedGaps
-                                        ? Icons.check_box
-                                        : Icons.check_box_outline_blank,
-                                    size: 12,
-                                    color: IOSColors.gray),
-                                const SizedBox(width: 4),
-                                const Text('Forgot something important', style: small),
-                              ]),
-                              const SizedBox(height: 3),
-                              Row(children: [
-                                Icon(
-                                    currentSession.revisitedSource
-                                        ? Icons.check_box
-                                        : Icons.check_box_outline_blank,
-                                    size: 12,
-                                    color: IOSColors.gray),
-                                const SizedBox(width: 4),
-                                const Text("Can't simplify enough", style: small),
-                              ]),
-                            ],
-                          ),
-                        ),
-                        const Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text('Before', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
-                            SizedBox(height: 6),
-                            Text('After', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                          child: _solidButton('Save\nSession', fade(IOSColors.purple, 0.8),
-                              _isValid(controller) ? _save : null)),
-                      const SizedBox(width: 14),
-                      Expanded(
-                          child: _solidButton(
-                              'Review\nSession', fade(IOSColors.green, 0.8), _showHistory)),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  _solidButton('Reset', fade(IOSColors.pink, 0.6),
-                      () => setState(() => currentSession = FeynmanSession()),
-                      height: 48),
-                ],
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: _choosing ? _chooseStep(pet, smc) : _introStep(pet, smc),
               ),
             ),
           ],
@@ -307,188 +240,260 @@ class _FeynmanScreenState extends State<FeynmanScreen> {
       ),
     );
   }
-}
 
-class _TextInputPage extends StatefulWidget {
-  final String title;
-  final String navTitle;
-  final String subtitle;
-  final String hint;
-  final String initial;
-  final double minHeight;
+  // ---- Step 1 ---------------------------------------------------------------
 
-  const _TextInputPage({
-    required this.title,
-    required this.navTitle,
-    required this.subtitle,
-    required this.hint,
-    required this.initial,
-    required this.minHeight,
-  });
-
-  @override
-  State<_TextInputPage> createState() => _TextInputPageState();
-}
-
-class _TextInputPageState extends State<_TextInputPage> {
-  late final TextEditingController _c = TextEditingController(text: widget.initial);
-
-  @override
-  void initState() {
-    super.initState();
-    _c.addListener(() => setState(() {}));
-  }
-
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final canSave = _c.text.trim().isNotEmpty;
-    return SheetScaffold(
-      title: widget.navTitle,
-      leadingLabel: 'Cancel',
-      trailingLabel: 'Done',
-      onTrailing: canSave ? () => Navigator.of(context).pop(_c.text) : null,
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text(widget.title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          Text(widget.subtitle, style: const TextStyle(fontSize: 15, color: IOSColors.gray)),
-          const SizedBox(height: 20),
-          Container(
-            constraints: BoxConstraints(minHeight: widget.minHeight),
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-                color: IOSColors.systemGray6, borderRadius: BorderRadius.circular(12)),
-            child: TextField(
-              controller: _c,
-              autofocus: true,
-              maxLines: null,
-              minLines: (widget.minHeight / 24).round(),
-              keyboardType: TextInputType.multiline,
-              decoration: const InputDecoration.collapsed(hintText: ''),
+  Widget _introStep(PetController pet, StudyMaterialsController smc) {
+    final topicOk = _topic.text.trim().length >= 3;
+    final notesOk = _selected.isNotEmpty;
+    return ListView(
+      key: const ValueKey('intro'),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      children: [
+        const ScreenTitle('Feynman technique', subtitle: 'Learn it, test it, explain it simply'),
+        const SizedBox(height: 16),
+        BuddyStage(
+          message: 'Hi ${greetingName(context)}! What are we learning $_when? '
+              'Be specific so I can be more helpful!',
+        ),
+        const SizedBox(height: 22),
+        const Text('WHAT ARE WE LEARNING?', style: NText.caption),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _topic,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: nInput('e.g. Photosynthesis: the light-dependent reactions', icon: Icons.lightbulb_rounded),
+        ),
+        const SizedBox(height: 22),
+        Row(
+          children: [
+            Expanded(child: Text('FEED ${buddyName(pet).toUpperCase()} YOUR NOTES', style: NText.caption)),
+            if (smc.materials.isNotEmpty)
+              TextButton(
+                onPressed: () => pushPage(context, const StudyMaterialsPage()),
+                child: const Text('Manage'),
+              ),
+          ],
+        ),
+        Text(
+          '${pet.state.hatched ? pet.state.name : 'Your buddy'} only knows what you feed it. '
+          'Pick the notes for this topic.',
+          style: NText.muted,
+        ),
+        const SizedBox(height: 10),
+        if (smc.isImporting)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2.5, color: context.pal.primary),
+                ),
+                const SizedBox(width: 10),
+                const Text('Reading your file…', style: NText.muted),
+              ],
             ),
           ),
-          const SizedBox(height: 20),
-          Text(widget.hint, style: const TextStyle(fontSize: 12, color: IOSColors.gray)),
-        ],
-      ),
-    );
-  }
-}
-
-class _GapsPage extends StatefulWidget {
-  final FeynmanSession session;
-  const _GapsPage({required this.session});
-
-  @override
-  State<_GapsPage> createState() => _GapsPageState();
-}
-
-class _GapsPageState extends State<_GapsPage> {
-  Widget _row(bool value, String title, String subtitle, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration:
-            BoxDecoration(color: IOSColors.systemGray6, borderRadius: BorderRadius.circular(12)),
-        child: Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
-            Icon(value ? Icons.check_box : Icons.check_box_outline_blank,
-                color: value ? IOSColors.blue : IOSColors.gray, size: 28),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 4),
-                  Text(subtitle, style: const TextStyle(fontSize: 12, color: IOSColors.gray)),
-                ],
-              ),
+            for (final m in smc.materials) _noteChip(m),
+            ActionChip(
+              avatar: const Icon(Icons.add_rounded, size: 18, color: NC.plum),
+              label: const Text('Add PDF, DOCX or PPTX'),
+              labelStyle: NText.caption.copyWith(color: NC.plum),
+              backgroundColor: NC.surface,
+              side: const BorderSide(color: NC.plumSoft, width: 1.5),
+              shape: const StadiumBorder(),
+              onPressed: smc.isImporting ? null : () => showAddMaterialSheet(context),
             ),
           ],
         ),
-      ),
+        const SizedBox(height: 26),
+        NButton('Continue',
+            icon: Icons.arrow_forward_rounded,
+            onPressed: topicOk && notesOk ? () => setState(() => _choosing = true) : null),
+        const SizedBox(height: 8),
+        if (!topicOk || !notesOk)
+          Text(
+            !topicOk ? 'Type the topic first (a few words is perfect).' : 'Feed at least one note so I can help.',
+            textAlign: TextAlign.center,
+            style: NText.caption,
+          ),
+      ],
     );
   }
 
+  Widget _noteChip(StudyMaterial m) {
+    final on = _selected.contains(m.id);
+    final (icon, accent, _) = materialStyle(m.kind);
+    return FilterChip(
+      selected: on,
+      showCheckmark: false,
+      avatar: Icon(on ? Icons.check_circle_rounded : icon, size: 18, color: on ? Colors.white : accent.strong),
+      label: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 180),
+        child: Text(m.title, overflow: TextOverflow.ellipsis),
+      ),
+      labelStyle: NText.caption.copyWith(color: on ? Colors.white : NC.ink),
+      backgroundColor: accent.soft,
+      selectedColor: accent.strong,
+      side: BorderSide.none,
+      shape: const StadiumBorder(),
+      onSelected: (v) => setState(() => v ? _selected.add(m.id) : _selected.remove(m.id)),
+    );
+  }
+
+  // ---- Step 2 ---------------------------------------------------------------
+
+  Widget _chooseStep(PetController pet, StudyMaterialsController smc) {
+    final name = buddyName(pet);
+    final count = _selected.length;
+    return ListView(
+      key: const ValueKey('choose'),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+      children: [
+        BuddyStage(message: 'Would you like $name to explain this concept, or take a test instead?'),
+        const SizedBox(height: 14),
+        Center(
+          child: NChip(
+            '${_topic.text.trim()} · $count ${count == 1 ? 'note' : 'notes'}',
+            icon: Icons.menu_book_rounded,
+          ),
+        ),
+        const SizedBox(height: 18),
+        if (_loading)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            child: Column(
+              children: [
+                CircularProgressIndicator(color: context.pal.primary),
+                const SizedBox(height: 12),
+                Text('$name is reading your notes…', style: NText.muted),
+              ],
+            ),
+          )
+        else ...[
+          _ModeCard(
+            accent: Accent.mint,
+            icon: Icons.record_voice_over_rounded,
+            title: 'Explain',
+            subtitle: 'Call $name and ask anything. Answers come straight from your notes.',
+            onTap: () => _start('explain'),
+          ),
+          const SizedBox(height: 12),
+          _ModeCard(
+            accent: Accent.peach,
+            icon: Icons.quiz_rounded,
+            title: 'Test',
+            subtitle: '$name gives you a mock test by voice. Answer out loud or type.',
+            onTap: () => _start('test'),
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: TextButton.icon(
+              onPressed: () => setState(() => _choosing = false),
+              icon: const Icon(Icons.arrow_back_rounded, size: 18),
+              label: const Text('Change topic or notes'),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+PetBrain _buildBrain((String, List<(String, String, String)>) args) => PetBrain.build(args.$1, args.$2);
+
+class _ModeCard extends StatelessWidget {
+  final Accent accent;
+  final IconData icon;
+  final String title, subtitle;
+  final VoidCallback onTap;
+  const _ModeCard(
+      {required this.accent, required this.icon, required this.title, required this.subtitle, required this.onTap});
+
   @override
   Widget build(BuildContext context) {
-    final s = widget.session;
-    return SheetScaffold(
-      title: 'Gaps',
-      leadingLabel: 'Cancel',
-      trailingLabel: 'Done',
-      onTrailing: () => Navigator.of(context).pop(),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
+    return NCard(
+      color: accent.soft,
+      shadow: false,
+      radius: 26,
+      padding: const EdgeInsets.all(18),
+      onTap: onTap,
+      child: Row(
         children: [
-          const Text('Identify Gaps', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          const Text('Mark any issues you encountered while explaining',
-              style: TextStyle(fontSize: 15, color: IOSColors.gray)),
-          const SizedBox(height: 20),
-          _row(s.identifiedGaps, 'Forgot something important',
-              "I couldn't remember key details or concepts",
-              () => setState(() => s.identifiedGaps = !s.identifiedGaps)),
-          const SizedBox(height: 16),
-          _row(s.revisitedSource, "Can't simplify enough",
-              'My explanation was too complex or unclear',
-              () => setState(() => s.revisitedSource = !s.revisitedSource)),
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(color: NC.surface, borderRadius: BorderRadius.circular(18)),
+            child: Icon(icon, color: accent.strong, size: 30),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: NText.title),
+                const SizedBox(height: 2),
+                Text(subtitle, style: NText.muted.copyWith(color: NC.ink)),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right_rounded, color: accent.strong, size: 28),
         ],
       ),
     );
   }
 }
 
-class _FeynmanHistoryPage extends StatelessWidget {
-  const _FeynmanHistoryPage();
+// ===========================================================================
+// History
+// ===========================================================================
 
-  Color _scoreColor(int score) {
-    if (score >= 80) return fade(IOSColors.green, 0.3);
-    if (score >= 60) return fade(IOSColors.yellow, 0.3);
-    return fade(IOSColors.red, 0.3);
+class FeynmanHistoryPage extends StatelessWidget {
+  const FeynmanHistoryPage({super.key});
+
+  Accent _scoreAccent(int score) {
+    if (score >= 80) return Accent.mint;
+    if (score >= 50) return Accent.butter;
+    return Accent.pink;
   }
 
   @override
   Widget build(BuildContext context) {
     final c = context.watch<FeynmanController>();
-    final sessions = c.savedSessions;
+    final sessions = c.savedSessions.reversed.toList();
     return SheetScaffold(
       title: 'Feynman History',
       trailingLabel: 'Done',
       onTrailing: () => Navigator.of(context).pop(),
       body: sessions.isEmpty
-          ? const Center(
-              child: Text('No Feynman sessions yet!', style: TextStyle(color: IOSColors.gray)))
+          ? const Center(child: Text('No Feynman sessions yet!', style: NText.muted))
           : ListView.separated(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(20),
               itemCount: sessions.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (_, i) {
                 final s = sessions[i];
+                final a = s.score == null ? Accent.plum : _scoreAccent(s.score!);
                 return Dismissible(
                   key: ValueKey(s.id),
                   direction: DismissDirection.endToStart,
+                  confirmDismiss: (_) =>
+                      confirmDialog(context, title: 'Delete this session?', message: 'This can\'t be undone.'),
                   onDismissed: (_) => c.deleteSession(s.id),
                   background: Container(
                     alignment: Alignment.centerRight,
                     padding: const EdgeInsets.only(right: 20),
-                    decoration: BoxDecoration(
-                        color: IOSColors.red, borderRadius: BorderRadius.circular(12)),
-                    child: const Icon(Icons.delete, color: Colors.white),
+                    decoration: BoxDecoration(color: NC.red, borderRadius: BorderRadius.circular(22)),
+                    child: const Icon(Icons.delete_rounded, color: Colors.white),
                   ),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                        color: IOSColors.systemGray6, borderRadius: BorderRadius.circular(12)),
+                  child: NCard(
+                    radius: 22,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -496,48 +501,48 @@ class _FeynmanHistoryPage extends StatelessWidget {
                           children: [
                             Expanded(
                               child: Text(s.concept,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                      fontSize: 17, fontWeight: FontWeight.w600)),
+                                  maxLines: 1, overflow: TextOverflow.ellipsis, style: NText.headline),
                             ),
                             if (s.score != null)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                    color: _scoreColor(s.score!),
-                                    borderRadius: BorderRadius.circular(8)),
-                                child: Text('${s.score}%', style: const TextStyle(fontSize: 12)),
-                              ),
+                              NChip('${s.score}%', background: a.soft, foreground: a.strong),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        Text(s.simpleExplanation,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 16, color: IOSColors.gray)),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            if (s.identifiedGaps) ...[
-                              const Icon(Icons.warning_amber_rounded,
-                                  size: 14, color: IOSColors.orange),
-                              const SizedBox(width: 2),
-                              const Text('Gaps Found',
-                                  style: TextStyle(fontSize: 12, color: IOSColors.orange)),
-                              const SizedBox(width: 8),
-                            ],
-                            if (s.revisitedSource) ...[
-                              const Icon(Icons.check_circle, size: 14, color: IOSColors.green),
-                              const SizedBox(width: 2),
-                              const Text('Reviewed',
-                                  style: TextStyle(fontSize: 12, color: IOSColors.green)),
-                            ],
-                            const Spacer(),
-                            Text(DateFormat.yMMMMd().format(s.dateCreated),
-                                style: const TextStyle(fontSize: 12, color: IOSColors.gray)),
-                          ],
+                        const SizedBox(height: 4),
+                        Text(
+                          '${s.mode == 'test' ? 'Mock test' : s.mode == 'explain' ? 'Explain call' : 'Session'}'
+                          ' · ${DateFormat.yMMMd().add_jm().format(s.dateCreated)}',
+                          style: NText.caption,
                         ),
+                        if (s.identifiedGaps || s.revisitedSource) ...[
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              if (s.identifiedGaps)
+                                const NChip('Forgot something',
+                                    icon: Icons.warning_amber_rounded,
+                                    background: NC.peachSoft,
+                                    foreground: NC.peach),
+                              if (s.revisitedSource)
+                                const NChip('Too complex',
+                                    icon: Icons.record_voice_over_rounded,
+                                    background: NC.skySoft,
+                                    foreground: NC.sky),
+                            ],
+                          ),
+                        ],
+                        if (s.gaps.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          for (final g in s.gaps.take(4))
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text('• $g', maxLines: 2, overflow: TextOverflow.ellipsis, style: NText.muted),
+                            ),
+                        ] else if (s.simpleExplanation.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(s.simpleExplanation, maxLines: 2, overflow: TextOverflow.ellipsis, style: NText.muted),
+                        ],
                       ],
                     ),
                   ),
