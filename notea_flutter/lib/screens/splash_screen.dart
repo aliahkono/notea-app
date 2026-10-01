@@ -94,36 +94,15 @@ class _SplashScreenState extends State<SplashScreen> {
     final size = MediaQuery.of(context).size;
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(
-        alignment: Alignment.center,
-        children: [
-          if (currentFrame >= 1)
-            Positioned.fill(
-              child: AnimatedOpacity(
-                opacity: backgroundOpacity,
-                duration: const Duration(seconds: 1),
-                curve: Curves.easeOut,
-                child: ImageFiltered(
-                  imageFilter: ui.ImageFilter.blur(sigmaX: 60, sigmaY: 60),
-                  child: Transform.scale(
-                    scale: 1.2,
-                    child: OverflowBox(
-                      maxWidth: size.width * 2,
-                      maxHeight: size.height * 2,
-                      child: Image.asset('assets/images/notea_logo.png',
-                          width: size.width * 2, height: size.height * 2, fit: BoxFit.cover),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          if (currentFrame == 0 || currentFrame == 1)
-            _logo('assets/images/notea_logo.png', logoScale, logoOpacity),
-          // Mounted from frame 1 (invisible) so the fade/scale-in animates.
-          if (currentFrame >= 1)
-            _logo('assets/images/notea_logo2.png', secondLogoScale, secondLogoOpacity),
-        ],
-      ),
-    );
-  }
-}
+      // SizedBox.expand makes the Stack fill the whole screen,
+      // so the logos are centred instead of sitting in the top-left corner.
+      body: SizedBox.expand(
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            if (currentFrame >= 1)
+              Positioned.fill(
+                child: AnimatedOpacity(
+                  opacity: backgroundOpacity,
+                  duration: const Duration(seconds: 1),
+                  curve: Curves.easeOut,
