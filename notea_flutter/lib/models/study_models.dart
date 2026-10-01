@@ -29,9 +29,12 @@ DateTime _addMonth() {
 }
 
 class LeitnerCard {
-  final String id = newId();
+  final String id;
   String question;
   String answer;
+
+  /// The imported file this card was made from (null = typed by the user).
+  String? sourceId;
   LeitnerBox box = LeitnerBox.dailyReview;
   DateTime dateCreated = DateTime.now();
   DateTime? lastReviewed;
@@ -39,7 +42,37 @@ class LeitnerCard {
   int correctCount = 0;
   int incorrectCount = 0;
 
-  LeitnerCard({required this.question, required this.answer});
+  LeitnerCard({String? id, required this.question, required this.answer, this.sourceId})
+      : id = id ?? newId();
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'question': question,
+        'answer': answer,
+        'sourceId': sourceId,
+        'box': box.name,
+        'dateCreated': dateCreated.millisecondsSinceEpoch,
+        'lastReviewed': lastReviewed?.millisecondsSinceEpoch,
+        'nextReviewDate': nextReviewDate.millisecondsSinceEpoch,
+        'correctCount': correctCount,
+        'incorrectCount': incorrectCount,
+      };
+
+  factory LeitnerCard.fromJson(Map<String, dynamic> j) {
+    final c = LeitnerCard(
+      id: j['id'] as String?,
+      question: (j['question'] as String?) ?? '',
+      answer: (j['answer'] as String?) ?? '',
+      sourceId: j['sourceId'] as String?,
+    );
+    c.box = LeitnerBox.values.firstWhere((b) => b.name == j['box'], orElse: () => LeitnerBox.dailyReview);
+    c.dateCreated = dateFrom(j['dateCreated']) ?? DateTime.now();
+    c.lastReviewed = dateFrom(j['lastReviewed']);
+    c.nextReviewDate = dateFrom(j['nextReviewDate']) ?? DateTime.now();
+    c.correctCount = (j['correctCount'] as num?)?.toInt() ?? 0;
+    c.incorrectCount = (j['incorrectCount'] as num?)?.toInt() ?? 0;
+    return c;
+  }
 
   void markCorrect() {
     correctCount += 1;
@@ -82,16 +115,47 @@ class LeitnerCard {
 enum ReviewDifficulty { forget, hard, medium, easy }
 
 class SpacedRepCard {
-  final String id = newId();
+  final String id;
   String front;
   String back;
+
+  /// The imported file this card was made from (null = typed by the user).
+  String? sourceId;
   int interval = 1;
   double easeFactor = 2.5;
   int repetitions = 0;
   DateTime nextReviewDate = DateTime.now();
   DateTime? lastReviewed;
 
-  SpacedRepCard({required this.front, required this.back});
+  SpacedRepCard({String? id, required this.front, required this.back, this.sourceId})
+      : id = id ?? newId();
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'front': front,
+        'back': back,
+        'sourceId': sourceId,
+        'interval': interval,
+        'easeFactor': easeFactor,
+        'repetitions': repetitions,
+        'nextReviewDate': nextReviewDate.millisecondsSinceEpoch,
+        'lastReviewed': lastReviewed?.millisecondsSinceEpoch,
+      };
+
+  factory SpacedRepCard.fromJson(Map<String, dynamic> j) {
+    final c = SpacedRepCard(
+      id: j['id'] as String?,
+      front: (j['front'] as String?) ?? '',
+      back: (j['back'] as String?) ?? '',
+      sourceId: j['sourceId'] as String?,
+    );
+    c.interval = (j['interval'] as num?)?.toInt() ?? 1;
+    c.easeFactor = (j['easeFactor'] as num?)?.toDouble() ?? 2.5;
+    c.repetitions = (j['repetitions'] as num?)?.toInt() ?? 0;
+    c.nextReviewDate = dateFrom(j['nextReviewDate']) ?? DateTime.now();
+    c.lastReviewed = dateFrom(j['lastReviewed']);
+    return c;
+  }
 
   void updateSchedule(ReviewDifficulty difficulty) {
     lastReviewed = DateTime.now();

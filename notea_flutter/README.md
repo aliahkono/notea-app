@@ -72,4 +72,6 @@ anything missing without touching `lib/`.
 - Icons are Material Symbols (rounded), the same set used in the Figma redesign.
 - Pet and egg illustrations are your original Figma drawings, exported to `assets/pet/`.
 - Fonts (Nunito, Fredoka) are bundled in `assets/fonts/` under the SIL Open Font License.
-- Leitner and Spaced Repetition start with the same sample cards each time, as in the iOS app.
+- Leitner and Spaced Repetition decks are saved on the phone. Add cards by typing them or by
+  making them from a PDF, Word (.docx) or PowerPoint (.pptx) file (previewed before saving).
+- Blurting "Reveal Notes" shows your own study materials (PDF, DOCX, PPTX or typed notes).

@@ -4,12 +4,13 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/flashcard_controller.dart';
 import '../controllers/pet_controller.dart';
 import '../models/pet.dart';
-
 import '../models/study_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
+import 'add_flashcards_screen.dart';
 
 // ===========================================================================
 // LeitnerTabView.swift
@@ -22,7 +23,6 @@ class LeitnerScreen extends StatefulWidget {
 }
 
 class _LeitnerScreenState extends State<LeitnerScreen> {
-  final List<LeitnerCard> cards = [];
   LeitnerCard? currentCard;
   LeitnerBox? currentBoxFilter;
   bool showAnswer = false;
@@ -31,17 +31,14 @@ class _LeitnerScreenState extends State<LeitnerScreen> {
   @override
   void initState() {
     super.initState();
-    cards.addAll([
-      LeitnerCard(question: 'What is the capital of France?', answer: 'Paris'),
-      LeitnerCard(question: 'What is 2 + 2?', answer: '4'),
-      LeitnerCard(question: 'Who wrote Romeo and Juliet?', answer: 'William Shakespeare'),
-    ]);
     _loadNextCard();
   }
 
   void _loadNextCard() {
     final now = DateTime.now();
-    final pool = cards
+    final pool = context
+        .read<FlashcardController>()
+        .leitner
         .where((c) =>
             (currentBoxFilter == null || c.box == currentBoxFilter) && !c.nextReviewDate.isAfter(now))
         .toList();
@@ -52,22 +49,15 @@ class _LeitnerScreenState extends State<LeitnerScreen> {
   void _mark(bool correct) {
     final card = currentCard;
     if (card == null) return;
-    setState(() {
-      if (correct) {
-        card.markCorrect();
-      } else {
-        card.markIncorrect();
-      }
-      context.read<PetController>().reward(PetReward.flashcard);
-      _loadNextCard();
-    });
+    context.read<FlashcardController>().markLeitner(card, correct);
+    context.read<PetController>().reward(PetReward.flashcard);
+    setState(_loadNextCard);
   }
 
   Future<void> _addCard() async {
-    final card = await pushPage<LeitnerCard>(context, const _AddLeitnerCardPage(), fullscreenDialog: true);
-    if (card == null) return;
+    await pushPage(context, const AddFlashcardsPage(mode: FlashcardMode.leitner), fullscreenDialog: true);
+    if (!mounted) return;
     setState(() {
-      cards.add(card);
       if (currentCard == null) _loadNextCard();
     });
   }
@@ -75,6 +65,11 @@ class _LeitnerScreenState extends State<LeitnerScreen> {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
+    final cards = context.watch<FlashcardController>().leitner;
+    // The card on screen may have been deleted from "View All Cards".
+    if (currentCard != null && !cards.any((c) => c.id == currentCard!.id)) {
+      currentCard = null;
+    }
     return Scaffold(
       backgroundColor: IOSColors.groupedBackground,
       body: SafeArea(
@@ -155,7 +150,7 @@ class _LeitnerScreenState extends State<LeitnerScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: currentCard != null
                         ? _cardDisplay(currentCard!, width)
-                        : _emptyState(width),
+                        : _emptyState(width, hasCards: cards.isNotEmpty),
                   ),
                   const SizedBox(height: 24),
                   Padding(
@@ -169,8 +164,10 @@ class _LeitnerScreenState extends State<LeitnerScreen> {
                           icon: Icons.layers,
                           title: 'View All\nCards',
                           color: IOSColors.mint,
-                          onTap: () => pushPage(context, _AllCardsPage(cards: cards),
-                              fullscreenDialog: true),
+                          onTap: () async {
+                            await pushPage(context, const _AllCardsPage(), fullscreenDialog: true);
+                            if (mounted && currentCard == null) setState(_loadNextCard);
+                          },
                         ),
                         _ActionButton(
                           icon: Icons.format_list_bulleted,
@@ -262,17 +259,26 @@ class _LeitnerScreenState extends State<LeitnerScreen> {
     );
   }
 
-  Widget _emptyState(double width) {
+  Widget _emptyState(double width, {required bool hasCards}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 40),
+      padding: const EdgeInsets.symmetric(vertical: 32),
       child: Column(
         children: [
           Image.asset('assets/images/cat_mascot.png', width: width * 0.2, height: width * 0.2),
           const SizedBox(height: 20),
-          const Text('No cards to review!', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500)),
+          Text(hasCards ? 'All caught up! 🎉' : 'No flashcards yet',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500)),
           const SizedBox(height: 8),
-          const Text('Add some flashcards to get started',
-              style: TextStyle(fontSize: 14, color: IOSColors.gray)),
+          Text(
+              hasCards
+                  ? 'No cards are due in this box right now. Come back later or pick another box.'
+                  : 'Type your own cards or make them from a PDF, Word or PowerPoint file.',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 14, color: IOSColors.gray)),
+          if (!hasCards) ...[
+            const SizedBox(height: 16),
+            NButton('Add new cards', icon: Icons.add_rounded, expand: false, onPressed: _addCard),
+          ],
         ],
       ),
     );
@@ -310,83 +316,25 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
-class _AddLeitnerCardPage extends StatefulWidget {
-  const _AddLeitnerCardPage();
-
-  @override
-  State<_AddLeitnerCardPage> createState() => _AddLeitnerCardPageState();
-}
-
-class _AddLeitnerCardPageState extends State<_AddLeitnerCardPage> {
-  final _q = TextEditingController();
-  final _a = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _q.addListener(() => setState(() {}));
-    _a.addListener(() => setState(() {}));
-  }
-
-  @override
-  void dispose() {
-    _q.dispose();
-    _a.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final valid = _q.text.isNotEmpty && _a.text.isNotEmpty;
-    return SheetScaffold(
-      title: 'Add New Card',
-      leadingLabel: 'Cancel',
-      trailingLabel: 'Save',
-      background: IOSColors.groupedBackground,
-      onTrailing: valid
-          ? () => Navigator.of(context).pop(LeitnerCard(question: _q.text, answer: _a.text))
-          : null,
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _formSection('QUESTION/TERM', _q, 'Enter your question or term'),
-          const SizedBox(height: 24),
-          _formSection('ANSWER/DEFINITION', _a, 'Enter the answer or definition'),
-        ],
-      ),
-    );
-  }
-}
-
-Widget _formSection(String header, TextEditingController c, String hint) {
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Padding(
-        padding: const EdgeInsets.only(left: 12, bottom: 6),
-        child: Text(header, style: const TextStyle(fontSize: 13, color: IOSColors.gray)),
-      ),
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
-        child: TextField(
-          controller: c,
-          minLines: 3,
-          maxLines: 6,
-          decoration: InputDecoration.collapsed(hintText: hint),
-        ),
-      ),
-    ],
-  );
-}
-
 class _AllCardsPage extends StatelessWidget {
-  final List<LeitnerCard> cards;
-  const _AllCardsPage({required this.cards});
+  const _AllCardsPage();
 
   @override
   Widget build(BuildContext context) {
-    final sections = <Widget>[];
+    final controller = context.watch<FlashcardController>();
+    final cards = controller.leitner;
+    final sections = <Widget>[
+      if (cards.isEmpty)
+        const Padding(
+          padding: EdgeInsets.all(40),
+          child: Text('No cards yet.', textAlign: TextAlign.center, style: TextStyle(color: IOSColors.gray)),
+        )
+      else
+        const Padding(
+          padding: EdgeInsets.fromLTRB(28, 8, 16, 0),
+          child: Text('Swipe a card left to delete it.', style: TextStyle(fontSize: 13, color: IOSColors.gray)),
+        ),
+    ];
     for (final box in LeitnerBox.values) {
       final boxCards = cards.where((c) => c.box == box).toList();
       if (boxCards.isEmpty) continue;
@@ -400,9 +348,13 @@ class _AllCardsPage extends StatelessWidget {
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
         child: Column(
           children: boxCards
-              .map((c) => ListTile(
-                    title: Text(c.question, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text(c.answer),
+              .map((c) => _SwipeToDelete(
+                    id: c.id,
+                    onDelete: () => controller.deleteLeitner(c),
+                    child: ListTile(
+                      title: Text(c.question, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text(c.answer),
+                    ),
                   ))
               .toList(),
         ),
@@ -431,26 +383,21 @@ class SpacedRepScreen extends StatefulWidget {
 class _SpacedRepScreenState extends State<SpacedRepScreen> {
   int currentCardIndex = 0;
   bool showAnswer = false;
-  final List<SpacedRepCard> cards = [
-    SpacedRepCard(front: 'What is the capital of France?', back: 'Paris'),
-    SpacedRepCard(front: 'What is 2 + 2?', back: '4'),
-    SpacedRepCard(front: 'What is the largest planet?', back: 'Jupiter'),
-  ];
 
   void _handleResponse(ReviewDifficulty d) {
+    final controller = context.read<FlashcardController>();
+    final cards = controller.spaced;
     if (currentCardIndex >= cards.length) return;
+    controller.reviewSpaced(cards[currentCardIndex], d);
     context.read<PetController>().reward(PetReward.flashcard);
     setState(() {
-      cards[currentCardIndex].updateSchedule(d);
       showAnswer = false;
       currentCardIndex = currentCardIndex < cards.length - 1 ? currentCardIndex + 1 : 0;
     });
   }
 
   Future<void> _addCard() async {
-    final card = await pushPage<SpacedRepCard>(context, const _AddSpacedRepCardPage(),
-        fullscreenDialog: true);
-    if (card != null) setState(() => cards.add(card));
+    await pushPage(context, const AddFlashcardsPage(mode: FlashcardMode.spaced), fullscreenDialog: true);
   }
 
   Widget _outlinedButton(IconData icon, String label, VoidCallback onTap) {
@@ -473,7 +420,10 @@ class _SpacedRepScreenState extends State<SpacedRepScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final hasCard = cards.isNotEmpty && currentCardIndex < cards.length;
+    final cards = context.watch<FlashcardController>().spaced;
+    // Cards can be deleted from "Review Schedule", so keep the index in range.
+    if (currentCardIndex >= cards.length) currentCardIndex = 0;
+    final hasCard = cards.isNotEmpty;
     return Scaffold(
       backgroundColor: rgb(1.0, 0.98, 0.93),
       body: SafeArea(
@@ -535,9 +485,17 @@ class _SpacedRepScreenState extends State<SpacedRepScreen> {
                             children: [
                               Icon(Icons.layers_clear, size: 48, color: fade(IOSColors.gray, 0.5)),
                               const SizedBox(height: 12),
-                              const Text('No cards to review',
+                              const Text('No flashcards yet',
                                   style: TextStyle(
                                       fontSize: 18, fontWeight: FontWeight.w500, color: IOSColors.gray)),
+                              const SizedBox(height: 6),
+                              const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 32),
+                                child: Text(
+                                    'Tap "Add New Cards" to type them or make them from a PDF, Word or PowerPoint file.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(fontSize: 14, color: IOSColors.gray)),
+                              ),
                             ],
                           ),
                   ),
@@ -558,7 +516,7 @@ class _SpacedRepScreenState extends State<SpacedRepScreen> {
                   _outlinedButton(Icons.add_circle, 'Add New Cards', _addCard),
                   const SizedBox(height: 12),
                   _outlinedButton(Icons.calendar_today, 'Review Schedule',
-                      () => pushPage(context, _ReviewSchedulePage(cards: cards), fullscreenDialog: true)),
+                      () => pushPage(context, const _ReviewSchedulePage(), fullscreenDialog: true)),
                   const SizedBox(height: 12),
                   GestureDetector(
                     onTap: () => Navigator.of(context).pop(),
@@ -616,69 +574,22 @@ class _DifficultyButton extends StatelessWidget {
   }
 }
 
-class _AddSpacedRepCardPage extends StatefulWidget {
-  const _AddSpacedRepCardPage();
-
-  @override
-  State<_AddSpacedRepCardPage> createState() => _AddSpacedRepCardPageState();
-}
-
-class _AddSpacedRepCardPageState extends State<_AddSpacedRepCardPage> {
-  final _front = TextEditingController();
-  final _back = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _front.addListener(() => setState(() {}));
-    _back.addListener(() => setState(() {}));
-  }
-
-  @override
-  void dispose() {
-    _front.dispose();
-    _back.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final valid = _front.text.isNotEmpty && _back.text.isNotEmpty;
-    return SheetScaffold(
-      title: 'New Card',
-      leadingLabel: 'Cancel',
-      background: IOSColors.groupedBackground,
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _formSection('CARD FRONT', _front, ''),
-          const SizedBox(height: 24),
-          _formSection('CARD BACK (ANSWER)', _back, ''),
-          const SizedBox(height: 24),
-          Container(
-            decoration:
-                BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10)),
-            child: TextButton(
-              onPressed: valid
-                  ? () => Navigator.of(context)
-                      .pop(SpacedRepCard(front: _front.text, back: _back.text))
-                  : null,
-              child: const Text('Save Card'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _ReviewSchedulePage extends StatelessWidget {
-  final List<SpacedRepCard> cards;
-  const _ReviewSchedulePage({required this.cards});
+  const _ReviewSchedulePage();
 
   @override
   Widget build(BuildContext context) {
+    final controller = context.watch<FlashcardController>();
+    final cards = controller.spaced;
     final fmt = DateFormat.yMMMd().add_jm();
+    if (cards.isEmpty) {
+      return SheetScaffold(
+        title: 'Review Schedule',
+        trailingLabel: 'Done',
+        onTrailing: () => Navigator.of(context).pop(),
+        body: const Center(child: Text('No cards yet.', style: TextStyle(color: IOSColors.gray))),
+      );
+    }
     return SheetScaffold(
       title: 'Review Schedule',
       trailingLabel: 'Done',
@@ -688,14 +599,43 @@ class _ReviewSchedulePage extends StatelessWidget {
         separatorBuilder: (_, __) => const Divider(height: 1),
         itemBuilder: (_, i) {
           final c = cards[i];
-          return ListTile(
-            title: Text(c.front, style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text('Next review: ${fmt.format(c.nextReviewDate)}\n'
-                'Interval: ${c.interval} days'),
-            isThreeLine: true,
+          return _SwipeToDelete(
+            id: c.id,
+            onDelete: () => controller.deleteSpaced(c),
+            child: ListTile(
+              title: Text(c.front, style: const TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text('Next review: ${fmt.format(c.nextReviewDate)}\n'
+                  'Interval: ${c.interval} days'),
+              isThreeLine: true,
+            ),
           );
         },
       ),
+    );
+  }
+}
+
+/// Swipe left to delete a card (used by "View All Cards" and "Review Schedule").
+class _SwipeToDelete extends StatelessWidget {
+  final String id;
+  final VoidCallback onDelete;
+  final Widget child;
+  const _SwipeToDelete({required this.id, required this.onDelete, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Dismissible(
+      key: ValueKey(id),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) => confirmDialog(context, title: 'Delete this card?', message: 'This can\'t be undone.'),
+      onDismissed: (_) => onDelete(),
+      background: Container(
+        color: IOSColors.red,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      child: child,
     );
   }
 }

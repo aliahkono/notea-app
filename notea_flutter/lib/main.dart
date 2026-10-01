@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'controllers/controllers.dart';
+import 'controllers/flashcard_controller.dart';
 import 'controllers/pet_controller.dart';
 import 'controllers/study_material_controller.dart';
 import 'models/pet.dart';
@@ -38,6 +39,7 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (_) => JournalController()),
         ChangeNotifierProvider(create: (_) => BlurtController()),
         ChangeNotifierProvider(create: (_) => StudyMaterialsController()),
+        ChangeNotifierProvider(create: (_) => FlashcardController()),
         ChangeNotifierProvider(create: (_) => FeynmanController()),
         ChangeNotifierProvider(create: (_) => ProfileController()),
       ],
