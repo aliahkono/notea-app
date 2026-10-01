@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import 'controllers/controllers.dart';
 import 'controllers/pet_controller.dart';
+import 'controllers/study_material_controller.dart';
 import 'models/pet.dart';
 import 'screens/splash_screen.dart';
 import 'services/database_manager.dart';
@@ -36,6 +37,7 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (_) => TaskController()),
         ChangeNotifierProvider(create: (_) => JournalController()),
         ChangeNotifierProvider(create: (_) => BlurtController()),
+        ChangeNotifierProvider(create: (_) => StudyMaterialsController()),
         ChangeNotifierProvider(create: (_) => FeynmanController()),
         ChangeNotifierProvider(create: (_) => ProfileController()),
       ],

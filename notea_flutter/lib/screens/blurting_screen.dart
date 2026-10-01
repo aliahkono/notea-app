@@ -7,6 +7,7 @@ import '../models/pet.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common.dart';
 import 'journal_screens.dart' show DrawingCanvas, StrokesPainter;
+import 'study_materials_screen.dart';
 
 const _lavender = Color(0xFFCFC0F5);
 const _cream = Color(0xFFFFFFFF);
@@ -27,11 +28,6 @@ class _BlurtingScreenState extends State<BlurtingScreen> {
   List<List<Offset>> drawingStrokes = [];
   bool isDrawingMode = false;
   bool isNotesRevealed = false;
-
-  static const referenceNotes =
-      "The first law of thermodynamics states that energy cannot be created or destroyed, only "
-      "transferred or changed from one form to another. The principle is often summarized as: "
-      "'Energy is conserved.'";
 
   @override
   void initState() {
@@ -101,10 +97,8 @@ class _BlurtingScreenState extends State<BlurtingScreen> {
 
   Widget _writingArea() {
     if (isNotesRevealed) {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.only(top: 20, bottom: 80),
-        child: const Text(referenceNotes, style: TextStyle(fontSize: 17, color: Colors.black)),
-      );
+      // The user's own PDFs / Word files / slides (no more hard-coded notes).
+      return const RevealedNotesPanel();
     }
     if (isDrawingMode) {
       return Padding(
@@ -252,6 +246,8 @@ class _BlurtingScreenState extends State<BlurtingScreen> {
                     runSpacing: 10,
                     alignment: WrapAlignment.center,
                     children: [
+                      _pillLink(Icons.menu_book_rounded, 'Study Materials',
+                          () => pushPage(context, const StudyMaterialsPage())),
                       _pillLink(Icons.history, 'Blurt History',
                           () => pushPage(context, const BlurtHistoryView())),
                       _pillLink(Icons.bar_chart, 'Word Count Tracker',
