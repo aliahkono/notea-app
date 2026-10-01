@@ -103,6 +103,7 @@ class _NotesTabViewState extends State<NotesTabView> {
                   subtitle: '${all.length} ${all.length == 1 ? 'note' : 'notes'} · ${controller.getFavoritesCount()} favourites',
                   trailing: CircleIconButton(Icons.settings_rounded,
                       onTap: () => pushPage(context, const SettingsTabView()))),
+              if (all.isNotEmpty) ...[
               const SizedBox(height: 14),
               Container(
                 decoration: BoxDecoration(borderRadius: BorderRadius.circular(999), boxShadow: softShadow()),
@@ -128,6 +129,7 @@ class _NotesTabViewState extends State<NotesTabView> {
                   }).toList(),
                 ),
               ),
+              ],
               const SizedBox(height: 14),
               if (all.isEmpty)
                 _EmptyNotes(onAdd: () => _openEditor())
@@ -196,28 +198,208 @@ class _NotesTabViewState extends State<NotesTabView> {
   }
 }
 
-class _EmptyNotes extends StatelessWidget {
+/// Empty state from the original Figma "NotesTab": a pastel bookshelf plus a
+/// "Your thoughts deserve a home" card. No pet art here, so nothing gives
+/// away the pet before the egg hatches.
+class _EmptyNotes extends StatefulWidget {
   final VoidCallback onAdd;
   const _EmptyNotes({required this.onAdd});
 
   @override
+  State<_EmptyNotes> createState() => _EmptyNotesState();
+}
+
+class _EmptyNotesState extends State<_EmptyNotes> {
+  int? mood;
+
+  static const _moods = [
+    (Icons.sentiment_dissatisfied_rounded, 'Rough day? Writing it down helps.', NC.sky),
+    (Icons.sentiment_neutral_rounded, 'Jot down one small thing you learned.', NC.butter),
+    (Icons.sentiment_satisfied_rounded, 'Nice! Capture that thought while it\'s fresh.', NC.mint),
+    (Icons.sentiment_very_satisfied_rounded, 'Great mood, great time to brain-dump ideas!', NC.pink),
+  ];
+
+  @override
   Widget build(BuildContext context) {
-    return NCard(
-      color: NC.pinkSoft,
-      shadow: false,
-      radius: 28,
-      padding: const EdgeInsets.all(20),
-      child: Column(
+    return Column(
+      children: [
+        const SizedBox(height: 8),
+        const _Bookshelf(),
+        const SizedBox(height: 22),
+        NCard(
+          color: NC.pinkSoft,
+          shadow: true,
+          radius: 32,
+          padding: const EdgeInsets.fromLTRB(22, 28, 22, 22),
+          child: Column(
+            children: [
+              const Text('Your thoughts\ndeserve a home',
+                  textAlign: TextAlign.center, style: NText.title),
+              const SizedBox(height: 10),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: Text(
+                  mood == null ? 'Start your first note!' : _moods[mood!].$2,
+                  key: ValueKey(mood),
+                  textAlign: TextAlign.center,
+                  style: NText.muted,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text('HOW ARE YOU FEELING?', style: NText.caption.copyWith(letterSpacing: 1.1)),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  color: fade(NC.surface, 0.7),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    for (var i = 0; i < _moods.length; i++)
+                      GestureDetector(
+                        onTap: () => setState(() => mood = mood == i ? null : i),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: mood == i ? fade(_moods[i].$3, 0.18) : Colors.transparent,
+                            shape: BoxShape.circle,
+                          ),
+                          child: AnimatedScale(
+                            scale: mood == i ? 1.15 : 1,
+                            duration: const Duration(milliseconds: 200),
+                            child: Icon(_moods[i].$1,
+                                size: 32, color: mood == i ? _moods[i].$3 : fade(NC.muted, 0.55)),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              NButton('Add note', icon: Icons.edit_note_rounded, color: NC.pink, onPressed: widget.onAdd),
+              const SizedBox(height: 10),
+              Text('Every new note gives your study buddy +3 XP', textAlign: TextAlign.center, style: NText.caption),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Pastel books standing on a shelf (Figma "NotesTab" header art).
+class _Bookshelf extends StatelessWidget {
+  const _Bookshelf();
+
+  @override
+  Widget build(BuildContext context) {
+    // (width, height, soft colour, strong colour, icon)
+    const books = <(double, double, Color, Color, IconData?)>[
+      (46, 142, NC.plumSoft, NC.plum, Icons.eco_rounded),
+      (14, 86, NC.sand, NC.muted, null),
+      (50, 107, NC.mintSoft, NC.mint, Icons.public_rounded),
+      (40, 76, NC.peachSoft, NC.peach, Icons.biotech_rounded),
+      (40, 120, NC.skySoft, NC.sky, Icons.square_foot_rounded),
+      (14, 106, NC.butterSoft, NC.butter, null),
+    ];
+    return SizedBox(
+      height: 176,
+      child: Stack(
+        alignment: Alignment.bottomCenter,
         children: [
-          Image.asset('assets/pet/cat_writing.png', height: 120),
-          const SizedBox(height: 12),
-          const Text('Your thoughts deserve a home', textAlign: TextAlign.center, style: NText.title),
-          const SizedBox(height: 6),
-          const Text('Write your first note — your pet earns +3 XP for every new one.',
-              textAlign: TextAlign.center, style: NText.muted),
-          const SizedBox(height: 16),
-          NButton('Add a note', icon: Icons.edit_note_rounded, expand: false, onPressed: onAdd),
+          // Shelf
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Container(
+              height: 26,
+              decoration: BoxDecoration(
+                color: NC.plumSoft,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: fade(NC.plum, 0.25), width: 1.5),
+                boxShadow: softShadow(0.08, 14, const Offset(0, 6)),
+              ),
+            ),
+          ),
+          // Books
+          Positioned(
+            bottom: 20,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                for (var i = 0; i < books.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                    child: _Book(
+                      width: books[i].$1,
+                      height: books[i].$2,
+                      soft: books[i].$3,
+                      strong: books[i].$4,
+                      icon: books[i].$5,
+                      delay: i * 90,
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
+      ),
+    );
+  }
+}
+
+class _Book extends StatelessWidget {
+  final double width, height;
+  final Color soft, strong;
+  final IconData? icon;
+  final int delay;
+  const _Book({
+    required this.width,
+    required this.height,
+    required this.soft,
+    required this.strong,
+    this.icon,
+    this.delay = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final band = Container(height: 4, color: fade(strong, 0.35));
+    // Books "grow" onto the shelf one after another when the screen opens.
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Duration(milliseconds: 450 + delay),
+      curve: Curves.easeOutBack,
+      builder: (_, v, child) => Transform.translate(
+        offset: Offset(0, (1 - v) * 24),
+        child: Opacity(opacity: v.clamp(0.0, 1.0), child: child),
+      ),
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: soft,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(9), bottom: Radius.circular(4)),
+          border: Border.all(color: fade(strong, 0.45), width: 1.5),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            band,
+            Expanded(
+              child: icon == null
+                  ? const SizedBox()
+                  : Center(child: Icon(icon, size: width * 0.55, color: strong)),
+            ),
+            band,
+            const SizedBox(height: 10),
+          ],
+        ),
       ),
     );
   }
