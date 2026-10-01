@@ -9,6 +9,7 @@ import 'feynman_screen.dart';
 import 'flashcard_screens.dart';
 import 'pomodoro_screen.dart';
 import 'settings_screen.dart';
+import 'sq3r_screen.dart';
 
 class _Technique {
   final String title;
@@ -101,78 +102,6 @@ class StudyTabView extends StatelessWidget {
             },
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// SQ3R guide (SQ3RTabView.swift), restyled.
-class SQ3RScreen extends StatefulWidget {
-  const SQ3RScreen({super.key});
-
-  @override
-  State<SQ3RScreen> createState() => _SQ3RScreenState();
-}
-
-class _SQ3RScreenState extends State<SQ3RScreen> {
-  final Set<int> done = {};
-
-  static const steps = [
-    ('Survey', 'Skim headings, pictures and summaries first.', Icons.search_rounded, Accent.sky),
-    ('Question', 'Turn headings into questions — ask them with your pet!', Icons.help_rounded, Accent.pink),
-    ('Read', 'Read actively to answer your questions.', Icons.menu_book_rounded, Accent.butter),
-    ('Recite', 'Say the key points out loud from memory.', Icons.record_voice_over_rounded, Accent.mint),
-    ('Review', 'Summarise your notes and fill the gaps.', Icons.refresh_rounded, Accent.plum),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const BackHeader(label: 'Study'),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-                children: [
-                  const ScreenTitle('SQ3R reading', subtitle: '5 steps to master any chapter 📚'),
-                  const SizedBox(height: 12),
-                  NProgress(done.length / steps.length, color: NC.peach),
-                  const SizedBox(height: 6),
-                  Text('${done.length} of ${steps.length} steps done', style: NText.caption),
-                  const SizedBox(height: 16),
-                  for (var i = 0; i < steps.length; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: NCard(
-                        radius: 22,
-                        onTap: () => setState(() => done.contains(i) ? done.remove(i) : done.add(i)),
-                        child: Row(
-                          children: [
-                            IconBubble(steps[i].$3, steps[i].$4, size: 52, iconSize: 26, radius: 18),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('${i + 1}. ${steps[i].$1}', style: NText.title.copyWith(fontSize: 20)),
-                                  Text(steps[i].$2, style: NText.muted),
-                                ],
-                              ),
-                            ),
-                            Icon(done.contains(i) ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-                                color: done.contains(i) ? NC.mint : NC.line, size: 28),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

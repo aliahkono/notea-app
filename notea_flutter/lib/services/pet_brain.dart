@@ -206,6 +206,18 @@ class PetBrain {
     return ts.take(6).toList();
   }
 
+  /// Turns any question (the user's own or generated) into something that
+  /// can be graded: the best answer from the notes + its key words.
+  /// [fallback] (e.g. the user's own written answer) is used when the notes
+  /// don't cover the question.
+  MockQuestion questionFor(String prompt, {String fallback = ''}) {
+    final r = answer(prompt);
+    var expected = r.found && !r.smallTalk ? (r.quote ?? '') : '';
+    if (expected.isEmpty) expected = fallback.trim();
+    return MockQuestion(prompt, expected,
+        expected.isEmpty ? const [] : _keywords(expected, exclude: tokenize(prompt).toSet()));
+  }
+
   /// Checks an answer against what the notes say.
   Verdict grade(MockQuestion q, String answer) {
     final a = answer.trim().toLowerCase();

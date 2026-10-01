@@ -54,6 +54,7 @@ enum PetReward {
   note(3, 2, 'New note'),
   blurt(5, 2, 'Blurt saved'),
   feynman(10, 3, 'Feynman session'),
+  sq3r(12, 3, 'SQ3R session'),
   flashcard(2, 1, 'Flashcard review');
 
   final int xp;
